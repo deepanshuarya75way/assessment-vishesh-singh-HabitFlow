@@ -31,6 +31,9 @@ const messages = [
   "Small steps, big results!",
   "Another win for today!",
 ];
+const [similarUsers, setSimilarUsers] = useState([]);
+const [similarLoading, setSimilarLoading] = useState(false);
+const [similarError, setSimilarError] = useState("");
 const today = () => new Date().toISOString().slice(0, 10);
 const friendlyDate = (date) => {
   const day = new Date(`${date}T12:00:00`);
@@ -77,6 +80,20 @@ function App() {
     const key = `habitflow-dismissed-alerts-${localStorage.getItem("habitflow-user-id") || "guest"}-${today()}`;
     try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; }
   });
+   
+  async function loadSimilarUsers(){
+    setSimilarLoading(true);
+    setSimilarError("");
+
+    try{
+      const response = await api.similarUsers(userId);
+      setSimilarUsers(response);
+    }catch(error){
+      setSimilarError(error.message || "Unable to load similar users");
+    } finally{
+      setSimilarLoading(false);
+    }
+  }
 
   async function load(id = userId) {
     try {
@@ -280,6 +297,14 @@ function App() {
             label="Today"
             active={view === "today"}
             onClick={() => setView("today")}
+          />
+          <NavButton
+          icon ={Users}
+          label="Discover"
+          active={view==="discover"}
+          onClick={()=>{
+            setView("discover")
+          }}
           />
           <NavButton
             icon={BarChart3}
