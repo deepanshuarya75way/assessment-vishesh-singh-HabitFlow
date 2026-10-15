@@ -7,7 +7,7 @@ const User = require('./models/User');
 const Habit = require('./models/Habit');
 const HabitLog = require('./models/HabitLog');
 const { dateKey, getCurrentStreak, getBestStreak, isHabitDueOnDate } = require('./utils/streak');
-
+const { FollowingDays, calculateSimilarity } =require("./utils/similarity.js");
 const app = express();
 const port = process.env.PORT || 5000;
 const allowedOrigins = (process.env.CLIENT_URL || 'http://localhost:5173,http://127.0.0.1:5173').split(',').map(origin => origin.trim());
@@ -41,6 +41,102 @@ function validateId(id) { return mongoose.isValidObjectId(id); }
 async function habitStats(habit, userId) {
   const logs = await HabitLog.find({ habitId: habit._id, userId }).sort({ completionDate: 1 }).lean();
   return { currentStreak: getCurrentStreak(habit, logs.map(log => log.completionDate)), bestStreak: getBestStreak(habit, logs.map(log => log.completionDate)), completedToday: logs.some(log => log.completionDate === dateKey(new Date())), logs: logs.map(log => log.completionDate) };
+}
+
+async function buildSimilarUsers(userId){
+  const today = new Date();
+  today.setHours(12,0,0,0);
+
+  const start = new Date(today);
+  start.setDate(start.getDate()-(FollowingDays-1));
+
+  const dateKeyLocal = date => [
+    date.getFullYear(),
+    String(date.getMonth()+1).padStart(2,"0"),
+    String(date.getDate()).padStart(2,"0")
+  ].join("-");
+
+  const startKey = dateKeyLocal(start);
+  const endKey = dateKeyLocal(today);
+
+  const [currentHabits, candidates] = await Promise.all
+  ([Habit.find({userId, archived:{$ne: true}})
+    .select("_id userId name icon scheduleType scheduleDays createdAt").lean(),
+    
+    Habit.find({
+      userId: {$ne: userId},
+      archived: {$ne : true}
+    })
+    .select("_id userId name scheduleType shceduledDays createdAt").lean()
+  ]);
+
+  if(!currentHabits.length) return [];
+  
+  const candidateIds = [...new Set(otherHabits.map(habit => String(habit.userId)))];
+
+  const currentHabitIds=currentHabits.map(habit=>habit._id);
+
+  const [currentLogs, otherLogs, users] = await Promise.all([
+    HabitLog.find({
+      userId,
+      habitId: {$in: currentHabitIds },
+      completionDate: {$gte : startKey, $lte: endKey}
+    }).select("habitId completionDate").lean(),
+
+    HabitLog.find({
+      userId: {$in: candidateIds },
+      completionDate: { $gte: startKEy, $ltee: endKey}
+    }).select("userId habitId completionDate").lean(),
+
+    User.find({
+      _id: {$in: candidateIds }
+    }).select("_id name").lean()
+  ]);
+
+  const habitByUser = new Map();
+  const logsByUser = new Map();
+  const usersById =new Map(
+    users.map(user=> [String(user._id), user])
+  );
+  
+  for(const habit of otherHabits){
+    const id = String(habit.userId);
+
+    if(!habitsByUser.has(id)){
+      habitsByUser.set(id, []);
+    }
+    habitsByUser.gert(id).push(habit);
+  }
+
+  for (const log of otherLogs){
+    const id =String(log.userId);
+
+    if(!logsByUser.has(id)){
+      logsByUser.set(id, []);
+    }
+    logsByUser.get(id).push(log);
+  }
+  const results= [];
+
+  for (const [candidateId, habits] of habitsByUser){
+    if(cadidateId === String(userIdd)) continue;
+
+    const user = userById.get(candidateId);
+    if(!user) continue;
+
+    const result = calculateSimilarity(currentHabits, habits, currentLogs,
+      logsByUser.get(candidateId) || [], startDate, today
+    );
+
+    if(!result.commomHabits.length) continue;
+
+    result.push({userId: candidateId, name: user.name || "HabitFlow user", ...result});
+  }
+
+  result.sort((a,b) =>b.similarityScore-a.similarityScore || a.name.localeCompare(b.name)||
+                                                           a.userId.localeCompare(b.userId));
+
+  return results.slice(0,5);
 }
 
 // Development-only fallback for running the UI before MongoDB is configured.
@@ -211,3 +307,33 @@ async function start() {
 }
 if (require.main === module) start().catch(error => { console.error('Startup failed:', error.message); process.exit(1); });
 module.exports = { app, seedDemo };
+
+app.get("/api/users/:id/similar", async(req, res) => {
+  try{
+    const {id} =req.params;
+
+    if(!validateId(id)){
+      return res.status(400).json({
+        message: "Invalid user Id"
+      });
+    }
+    const user = await User.findById(id).select("_id").lean();
+
+    if(!user){
+      return res.status(404).json({
+        message:"User not found"
+      });
+    }
+    const users = await getSimilarUsersData(user._id);
+
+    return res.status(200).json({
+      users,
+      followingDays: FollowingDays
+    });
+  }catch(error){
+    console.error("similar users API error:", error);
+    return res.status(500).json({
+      message: "Unable to retrieve similar users"
+    });
+  }
+});

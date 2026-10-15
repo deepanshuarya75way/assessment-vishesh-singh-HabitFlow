@@ -20,4 +20,6 @@ export const api = {
   history: userId => request(`/history?userId=${userId}`),
   report: userId => request(`/reports/${userId}`),
   updateUser: (id, user) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(user) })
+
+  similarUsers: (userId) => request(`/usrs/${encodedURIComponent(userId)}/similar`),
 };
